@@ -1,6 +1,6 @@
 'use strict';
 var EventEmitter = require('events').EventEmitter;
-var fs = require('fs');
+var fs = require('graceful-fs');
 var sysPath = require('path');
 var asyncEach = require('async-each');
 var anymatch = require('anymatch');
@@ -10,7 +10,6 @@ var isAbsolute = require('path-is-absolute');
 var inherits = require('inherits');
 
 var NodeFsHandler = require('./lib/nodefs-handler');
-var FsEventsHandler = require('./lib/fsevents-handler');
 
 var arrify = function(value) {
   if (value == null) return [];
@@ -78,15 +77,9 @@ function FSWatcher(_opts) {
   if (undef('binaryInterval')) opts.binaryInterval = 300;
   this.enableBinaryInterval = opts.binaryInterval !== opts.interval;
 
-  // Enable fsevents on OS X when polling isn't explicitly enabled.
-  if (undef('useFsEvents')) opts.useFsEvents = !opts.usePolling;
-
-  // If we can't use fsevents, ensure the options reflect it's disabled.
-  if (!FsEventsHandler.canUse()) opts.useFsEvents = false;
-
-  // Use polling on Mac if not using fsevents.
+  // Use polling on Mac
   // Other platforms use non-polling fs.watch.
-  if (undef('usePolling') && !opts.useFsEvents) {
+  if (undef('usePolling')) {
     opts.usePolling = process.platform === 'darwin';
   }
 
@@ -106,7 +99,7 @@ function FSWatcher(_opts) {
   }
 
   // Editor atomic write normalization enabled by default with fs.watch
-  if (undef('atomic')) opts.atomic = !opts.usePolling && !opts.useFsEvents;
+  if (undef('atomic')) opts.atomic = !opts.usePolling;
   if (opts.atomic) this._pendingUnlinks = Object.create(null);
 
   if (undef('followSymlinks')) opts.followSymlinks = true;
@@ -516,7 +509,7 @@ FSWatcher.prototype._remove = function(directory, item) {
 
   // if the only watched file is removed, watch for its return
   var watchedDirs = Object.keys(this._watched);
-  if (!isDirectory && !this.options.useFsEvents && watchedDirs.length === 1) {
+  if (!isDirectory && watchedDirs.length === 1) {
     this.add(directory, item, true);
   }
 
@@ -550,9 +543,7 @@ FSWatcher.prototype._remove = function(directory, item) {
   if (wasTracked && !this._isIgnored(path)) this._emit(eventName, path);
 
   // Avoid conflicts if we later create another file with the same name
-  if (!this.options.useFsEvents) {
-    this._closePath(path);
-  }
+  this._closePath(path);
 };
 
 FSWatcher.prototype._closePath = function(path) {
@@ -605,25 +596,21 @@ FSWatcher.prototype.add = function(paths, _origAdd, _internal) {
     }
   }, this);
 
-  if (this.options.useFsEvents && FsEventsHandler.canUse()) {
-    if (!this._readyCount) this._readyCount = paths.length;
-    if (this.options.persistent) this._readyCount *= 2;
-    paths.forEach(this._addToFsEvents, this);
-  } else {
-    if (!this._readyCount) this._readyCount = 0;
-    this._readyCount += paths.length;
-    asyncEach(paths, function(path, next) {
-      this._addToNodeFs(path, !_internal, 0, 0, _origAdd, function(err, res) {
-        if (res) this._emitReady();
-        next(err, res);
-      }.bind(this));
-    }.bind(this), function(error, results) {
-      results.forEach(function(item) {
-        if (!item) return;
-        this.add(sysPath.dirname(item), sysPath.basename(_origAdd || item));
-      }, this);
+
+  if (!this._readyCount) this._readyCount = 0;
+  this._readyCount += paths.length;
+  asyncEach(paths, function(path, next) {
+    this._addToNodeFs(path, !_internal, 0, 0, _origAdd, function(err, res) {
+      if (res) this._emitReady();
+      next(err, res);
     }.bind(this));
-  }
+  }.bind(this), function(error, results) {
+    results.forEach(function(item) {
+      if (!item) return;
+      this.add(sysPath.dirname(item), sysPath.basename(_origAdd || item));
+    }, this);
+  }.bind(this));
+
 
   return this;
 };
@@ -695,7 +682,6 @@ function importHandler(handler) {
   });
 }
 importHandler(NodeFsHandler);
-if (FsEventsHandler.canUse()) importHandler(FsEventsHandler);
 
 // Export FSWatcher class
 exports.FSWatcher = FSWatcher;

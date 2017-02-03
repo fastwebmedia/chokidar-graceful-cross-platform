@@ -97,11 +97,8 @@ describe('chokidar', function() {
     chokidar.watch.should.be.a('function');
   });
 
-  if (os === 'darwin') {
-    describe('fsevents (native extension)', runTests.bind(this, {useFsEvents: true}));
-  }
-  if (os !== 'darwin' || !node010) {
-    describe('fs.watch (non-polling)', runTests.bind(this, {usePolling: false, useFsEvents: false}));
+  if (!node010) {
+    describe('fs.watch (non-polling)', runTests.bind(this, {usePolling: false}));
   }
   describe('fs.watchFile (polling)', runTests.bind(this, {usePolling: true, interval: 10}));
 });
@@ -116,7 +113,7 @@ function runTests(baseopts) {
 
   before(function() {
     // flags for bypassing special-case test failures on CI
-    osXFsWatch = os === 'darwin' && !baseopts.usePolling && !baseopts.useFsEvents;
+    osXFsWatch = os === 'darwin' && !baseopts.usePolling;
     osXFsWatch010 = osXFsWatch && node010;
     win32Polling = os === 'win32' && baseopts.usePolling;
     win32Polling010 = win32Polling && node010;
@@ -1124,7 +1121,7 @@ function runTests(baseopts) {
     });
     describe('depth', function() {
       beforeEach(function(done) {
-        var i = 0, r = function() { i++ && w(done, options.useFsEvents && 200)(); };
+        var i = 0, r = function() { i++ && w(done, 200)(); };
         fs.mkdir(getFixturePath('subdir'), 0x1ed, function() {
           fs.writeFile(getFixturePath('subdir/add.txt'), 'b', r);
           fs.mkdir(getFixturePath('subdir/subsub'), 0x1ed, function() {
@@ -1414,7 +1411,7 @@ function runTests(baseopts) {
             .on('all', spy)
             .on('ready', function() {
               spy.should.have.been.calledWith('add', filePath);
-              if (!options.useFsEvents) return done();
+              return done();
               fs.writeFile(filePath, Date.now(), simpleCb);
               waitFor([spy.withArgs('change')], function() {
                 spy.should.have.been.calledWith('change', filePath);
